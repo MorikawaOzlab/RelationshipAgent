@@ -14,7 +14,7 @@ from negmas import *
 from scml.std import *
 
 from AS0 import AS0
-__all__ = ["AS0"]
+__all__ = ["MyAS0"]
 
 from dataclasses import dataclass
 
@@ -34,7 +34,7 @@ class MyAS0(AS0):
 
     INITIAL_QUANTITY_RATIO = 0.1 # 0step目における提案取引量 maxp * ratio
     QUANTITY_AVG_DECAY = 0.7 # 取引量の加重平均
-    FAULT_QUALITY_DECREASE = 1
+    AVG_DECREASE_ON_FAULT = 1
 
     partner_weighted_avg_quantity: dict[str, float]
     # 初回提案の内容を一時的に保持するための変数
@@ -83,7 +83,7 @@ class MyAS0(AS0):
         self._update_partner_avg_quantity(partner, quantity)
         
         # print("avg quantitiy", partner, self.partner_weighted_avg_quantity[partner])
-        print(f"success \n{contract}\n")
+        # print(f"success \n{contract}\n")
 
     def on_negotiation_failure(self, partners, annotation, mechanism, state):
         # 契約が成立しなかった交渉相手の取引量の加重平均を減らす
@@ -91,7 +91,7 @@ class MyAS0(AS0):
         current_quantity = self.partner_weighted_avg_quantity[partner]
         self.partner_weighted_avg_quantity[partner] = max(
             1,
-            current_quantity - self.FAULT_QUALITY_DECREASE
+            current_quantity - self.AVG_DECREASE_ON_FAULT
         )
 
         # print(f"fialture {partners}: {state}")
@@ -138,7 +138,7 @@ class MyAS0(AS0):
                 supply_offers[partner] = (
                     quantity,
                     self.awi.current_step,
-                    max(1, price_issue.max_value - price) # 安いほうが利益が出るため、価値を逆転し、KP問題
+                    price_issue.max_value - price + 1 # 安いほうが利益が出るため、価値を逆転し、KP問題
                 )
             else:
                 consume_offers[partner] = offers[partner]
@@ -155,10 +155,10 @@ class MyAS0(AS0):
                 continue
             response[partner] = offer
 
-        print("supply needs: ", current_needs_supply, " consume needs: ", current_needs_consume)
+        # print("supply needs: ", current_needs_supply, " consume needs: ", current_needs_consume)
         # print("生成したこちらからのオファー: ", offers)
         # print("エージェントごとの最適量: ", distribution)
-        print("ナップサックによって選ばれたオファー: ", response)
+        # print("ナップサックによって選ばれたオファー: ", response)
         return response 
 
     def counter_all(self, offers, states):
@@ -181,7 +181,7 @@ class MyAS0(AS0):
                 supply_offers[partner] = (
                     offer[QUANTITY],
                     offer[TIME],
-                    max(1, price_issue.max_value - offer[UNIT_PRICE])# 安いほうが利益が出るので価値を逆転
+                    price_issue.max_value - offer[UNIT_PRICE] + 1 #安いほうが利益が出るので価値を逆転
                 )
             else:
                 consume_offers[partner] = offer
@@ -204,7 +204,7 @@ class MyAS0(AS0):
 
         # print("\nsupply needs: ", current_needs_supply, " consume needs: ", current_needs_consume)
         # print(selected_partners_consume, selected_partners_supply)
-        print("response: ", response)
+        # print("response: ", response)
         return response
     
     def init_partner_avg_quantity(self, partners) -> None:
@@ -232,7 +232,7 @@ class MyAS0(AS0):
         if self.NO_FIRST_PROPOSAL:
             return dict(zip(partners, repeat(0)))
 
-        if self.AS0_DISTRIBUTION or self.AS0_FIRST_PROPOSALS:
+        if self.AS0_DISTRIBUTION:
             return super().distribute_todays_needs()
         
         # 単純にこれまでの取引量の加重平均を取引量とする
