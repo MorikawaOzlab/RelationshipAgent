@@ -6,17 +6,16 @@ from __future__ import annotations
 from itertools import repeat
 import random
 from collections import defaultdict
+from typing import Literal
 
-# required for typing
 from negmas import *
-
-# required for development
 from scml.std import *
 
 from AS0 import AS0
-__all__ = ["MyAS0"]
 
 from dataclasses import dataclass
+
+__all__ = ["MyAS0"]
 
 @dataclass
 class TradeStats:
@@ -106,8 +105,8 @@ class MyAS0(AS0):
             self.init_partner_avg_quantity(self.negotiators.keys())
 
         offers = {}
-        supply_offers = {}
-        consume_offers = {}
+        buy_offers = {}
+        sell_offers = {}
         response = {}
 
         # 取引量を決定
@@ -135,23 +134,21 @@ class MyAS0(AS0):
 
             if partner in self.awi.my_suppliers:
                 price_issue = self.awi.current_input_issues[UNIT_PRICE]
-                supply_offers[partner] = (
-                    quantity,
-                    self.awi.current_step,
-                    price_issue.max_value - price + 1 # 安いほうが利益が出るため、価値を逆転し、KP問題
-                )
+                buy_offers[partner] = offers[partner]
             else:
-                consume_offers[partner] = offers[partner]
+                sell_offers[partner] = offers[partner]
 
         # 動的計画法によって最適なオファーを選ぶ
-        current_needs_supply, current_needs_consume = self.get_current_needs()
+        current_needs_buy, current_needs_sell = self.get_current_needs()
 
-        _, selected_partners_supply = solve_knapsack_for_scml_offers(supply_offers, current_needs_supply)
-        _, selected_partners_consume = solve_knapsack_for_scml_offers(consume_offers, current_needs_consume*2)
+        _, selected_supplier = solve_knapsack_for_scml_offers(buy_offers, current_needs_buy, "low")
+        _, selected_consumer = solve_knapsack_for_scml_offers(sell_offers, current_needs_sell, "high")
+
+        optimal_supply_offer = assign_delivery_steps_by_knapsack(buy_offers, "supply")
 
         # 選ばれたオファーだけの辞書を作成
         for partner, offer in offers.items():
-            if not (partner in selected_partners_supply or partner in selected_partners_consume):
+            if not (partner in selected_supplier or partner in selected_consumer):
                 continue
             response[partner] = offer
 
@@ -168,8 +165,8 @@ class MyAS0(AS0):
             return super().counter_all(offers, states)
 
         response = {}
-        supply_offers = {}
-        consume_offers = {}
+        buy_offers = {}
+        sell_offers = {}
         
         # 買い契約と売り契約に仕分け
         for partner, offer in offers.items():
@@ -178,18 +175,18 @@ class MyAS0(AS0):
             )
             if partner in self.awi.my_suppliers:
                 price_issue = self.awi.current_input_issues[UNIT_PRICE]
-                supply_offers[partner] = (
+                buy_offers[partner] = (
                     offer[QUANTITY],
                     offer[TIME],
                     price_issue.max_value - offer[UNIT_PRICE] + 1 #安いほうが利益が出るので価値を逆転
                 )
             else:
-                consume_offers[partner] = offer
+                sell_offers[partner] = offer
 
         # 最適なオファーの組み合わせを探索
         current_needs_supply, current_needs_consume = self.get_current_needs()
-        _, selected_partners_supply = solve_knapsack_for_scml_offers(supply_offers, current_needs_supply)
-        _, selected_partners_consume = solve_knapsack_for_scml_offers(consume_offers, current_needs_consume*2)
+        _, selected_partners_supply = solve_knapsack_for_scml_offers(buy_offers, current_needs_supply)
+        _, selected_partners_consume = solve_knapsack_for_scml_offers(sell_offers, current_needs_consume*2)
 
         # 受諾リストを作成
         for partner in selected_partners_supply:
@@ -220,6 +217,9 @@ class MyAS0(AS0):
             self.partner_weighted_avg_quantity[partner] = (
                 quantity_issue.max_value + quantity_issue.min_value
             ) * self.INITIAL_QUANTITY_RATIO 
+
+    def assign_delivery_steps_by_knapsack():
+        pass
 
     def distribute_todays_needs(self, partners=None) -> dict[str, int]:
         """
@@ -283,9 +283,22 @@ class MyAS0(AS0):
 def solve_knapsack_for_scml_offers(
     offers: dict[str, tuple[int, int, int]],
     capacity: int,
+    price_mode: Literal["high", "low"] = "high",
+    max_unit_price: int | None = None,
 ) -> tuple[int, list[str]]:
     """
-    SCMLのオファー集合から、数量制約内で価格合計が最大になる組み合わせを選ぶ。
+    SCMLのオファー集合から、数量制約内で最も価値が高い組み合わせを選ぶ。
+
+    price_mode:
+        "high":
+            unit_price が高いほど良い。
+            主に「売る側」、つまり consumer からのオファーを選ぶときに使う。
+
+        "low":
+            unit_price が低いほど良い。
+            主に「買う側」、つまり supplier からのオファーを選ぶときに使う。
+            価格が 0 に近いほど価値が高くなるように、
+            max_unit_price - unit_price を価値として使う。
 
     Args:
         offers:
@@ -296,17 +309,52 @@ def solve_knapsack_for_scml_offers(
             受け入れ可能な最大数量。
             例: 今日必要な数量、awi.n_lines、在庫上限など。
 
+        price_mode:
+            "high" なら価格が高いほど良い。
+            "low" なら価格が低いほど良い。
+
+        max_unit_price:
+            price_mode="low" のときに使う基準価格。
+            基本的には issue の max_value を渡すのがおすすめ。
+            省略した場合は、offers 内の最大 unit_price を使う。
+
     Returns:
         max_value:
             選んだオファーの合計価値。
-            ここでは quantity * unit_price を価値とする。
 
         selected_partners:
             選ばれた partner のリスト。
     """
 
+    if capacity <= 0 or not offers:
+        return 0, []
+
+    if price_mode not in ("high", "low"):
+        raise ValueError('price_mode must be "high" or "low"')
+
     partners = list(offers.keys())
     n = len(partners)
+
+    if price_mode == "low" and max_unit_price is None:
+        max_unit_price = max(offer[UNIT_PRICE] for offer in offers.values())
+
+    def calc_value(offer: tuple[int, int, int]) -> int:
+        quantity = offer[QUANTITY]
+        unit_price = offer[UNIT_PRICE]
+
+        if price_mode == "high":
+            # 売る側: 高く売れるほど良い
+            unit_value = unit_price
+
+        else:
+            # 買う側: 安く買えるほど良い
+            # price が 0 に近いほど unit_value が大きくなる
+            unit_value = max_unit_price - unit_price
+
+            # 念のため負の価値は 0 にする
+            unit_value = max(0, unit_value)
+
+        return quantity * unit_value
 
     dp = [[0 for _ in range(capacity + 1)] for _ in range(n + 1)]
 
@@ -315,9 +363,7 @@ def solve_knapsack_for_scml_offers(
         offer = offers[partner]
 
         quantity = offer[QUANTITY]
-        unit_price = offer[UNIT_PRICE]
-
-        value = quantity * unit_price
+        value = calc_value(offer)
 
         for q in range(capacity + 1):
             # 選ばない場合
