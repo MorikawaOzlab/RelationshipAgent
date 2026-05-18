@@ -31,7 +31,12 @@ from numpy.random import choice
 
 # required for development
 from scml.std import *
-from agents.RelationshipAgent import RelationshipAgent
+from MyAgent import MyAgent
+from agents.AS0_log import AS0_log
+from AS0_experimental import MyAS0
+
+from pathlib import Path
+from make_scml_log_viewer import generate_html_log
 
 __all__ = ["AS0"]
 
@@ -161,20 +166,6 @@ def distribute(q: int, n: int) -> list[int]:
 def powerset(iterable):
     s = list(iterable)
     return chain.from_iterable(combinations(s, r) for r in range(len(s) + 1))
-
-
-class MyAgent(StdSyncAgent):
-    def first_proposals(self):
-        return {
-            partner: SAOResponse(ResponseType.END_NEGOTIATION, None)
-            for partner in self.awi.current_states.keys()
-        }
-
-    def counter_all(self, offers, states):
-        return {
-            partner: SAOResponse(ResponseType.END_NEGOTIATION, None)
-            for partner in offers.keys()
-        }
     
 def export_and_plot_stats(stats_df: pd.DataFrame, excel_path: str = "stats.xlsx") -> None:
     """
@@ -274,35 +265,39 @@ if __name__ == '__main__':
 
     #エージェントの担当工場を変更する場合、typesのエージェントの順番を変える
     types = [
-        RelationshipAgent, 
-        name_map_2025["AS0"],
+        # AS0_log,
+        name_map_2025["PonponAgent"], 
         name_map_2025["XenoSotaAgent"], 
+        name_map_2025["AS0"],
+        name_map_2025["ProactiveAgent"], 
+        name_map_2025["KATSUDONAgent"], 
         name_map_2024["PenguinAgent"], 
         name_map_2025["UltraSuperMiracleSoraFinalAgentZ"], 
         name_map_2025["AS0"],
-        name_map_2025["PonponAgent"], 
-        name_map_2025["ProactiveAgent"], 
-        name_map_2025["KATSUDONAgent"], 
-        name_map_2025["OptimisticAgent"], 
-        name_map_2024["Group2"], 
+        MyAgent, 
+        # name_map_2025["OptimisticAgent"], 
+        # name_map_2024["Group2"], 
         name_map_2024["AX"], 
         name_map_2024["DogAgent"], 
         name_map_2024["MatchingPennies"], 
         name_map_2024["S5s"], 
         name_map_2024["CautiousStdAgent"], 
-        name_map_2024["QuickDecisionAgent"], 
+        # name_map_2025["AS0"],
+        # name_map_2024["QuickDecisionAgent"], 
     ]
 
     #シミュレーション設定
     world = SCML2024StdWorld(
         **SCML2024StdWorld.generate(
             agent_types = types,
-            agent_processes=[0, 0, 0, 0, 0, 1, 1, 1, 1, 1, 1, 2, 2, 2, 2, 2, 2],
+            agent_processes=[0]*4 + [1]*5 + [2]*5,
             n_processes=3,
             n_steps=50,
             construct_graphs=True,
             random_agent_types=False,
             name="test_world",
+            
+            # n_competitors_per_world=len(types),
         )
     )
     world.init()
@@ -335,3 +330,5 @@ if __name__ == '__main__':
     print("\n===== Time Summary =====")
     print(f"Total time: {total_time:.4f} sec")
     print(f"Avg per step: {total_time / world.n_steps:.4f} sec")
+
+    generate_html_log()
